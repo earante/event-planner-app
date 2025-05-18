@@ -1,71 +1,69 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect } from "react";
+import { supabase } from "../utils/supabaseClient";
 
-    const AuthContext = createContext();
+const AuthContext = createContext();
 
-    export const useAuth = () => useContext(AuthContext);
+export const useAuth = () => useContext(AuthContext);
 
-    const AuthProvider = ({ children }) => {
-      const [user, setUser] = useState(null);
-      const [loading, setLoading] = useState(true);
+const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-      useEffect(() => {
-        const storedUser = localStorage.getItem('eventPlannerUser');
-        if (storedUser) {
-          setUser(JSON.parse(storedUser));
-        }
+  useEffect(() => {
+    // Check for active session on mount
+    const session = supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+    // Listen for auth state changes
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setUser(session?.user ?? null);
         setLoading(false);
-      }, []);
+      }
+    );
 
-      const login = (email, password) => {
-        setLoading(true);
-        const users = JSON.parse(localStorage.getItem('eventPlannerUsers')) || [];
-        const foundUser = users.find(u => u.email === email && u.password === password); 
-
-        if (foundUser) {
-          const userToStore = { email: foundUser.email, id: foundUser.id };
-          localStorage.setItem('eventPlannerUser', JSON.stringify(userToStore));
-          setUser(userToStore);
-          setLoading(false);
-          return true;
-        } else {
-          setLoading(false);
-          return false;
-        }
-      };
-
-      const signup = (email, password) => {
-        setLoading(true);
-        let users = JSON.parse(localStorage.getItem('eventPlannerUsers')) || [];
-        if (users.find(u => u.email === email)) {
-          setLoading(false);
-          return false;
-        }
-        
-        const newUser = { id: Date.now().toString(), email, password }; 
-        users.push(newUser);
-        localStorage.setItem('eventPlannerUsers', JSON.stringify(users));
-        
-        const userToStore = { email: newUser.email, id: newUser.id };
-        localStorage.setItem('eventPlannerUser', JSON.stringify(userToStore));
-        setUser(userToStore);
-        setLoading(false);
-        return true;
-      };
-
-      const logout = () => {
-        localStorage.removeItem('eventPlannerUser');
-        setUser(null);
-      };
-
-      const value = {
-        user,
-        loading,
-        login,
-        signup,
-        logout,
-      };
-
-      return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+    return () => {
+      listener.subscription.unsubscribe();
     };
+  }, []);
 
-    export default AuthProvider;
+  const login = async (email, password) => {
+    setLoading(true);
+    const { error, data } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    setLoading(false);
+    if (error) {
+      console.error("Supabase login error:", error.message);
+      return false;
+    }
+    return !!data.session;
+  };
+
+  const signup = async (email, password) => {
+    setLoading(true);
+    const { error, data } = await supabase.auth.signUp({ email, password });
+    setLoading(false);
+    return !error;
+  };
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  };
+
+  const value = {
+    user,
+    loading,
+    login,
+    signup,
+    logout,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
+export default AuthProvider;
